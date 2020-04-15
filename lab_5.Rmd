@@ -1,0 +1,167 @@
+---
+title: "Lab 5"
+author: "Orion Hunter"
+date: "4/15/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Before the analysis, first load in the `tidyverse` package and the data. Two dataframes: `accident` (accident data) and `person` (person data).
+
+```{r}
+library(tidyverse)
+accident <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/accident.csv", stringsAsFactors = FALSE)
+person <- read.csv("https://raw.githubusercontent.com/xdaiISU/ds202materials/master/hwlabs/fars2017/person.csv", stringsAsFactors = FALSE)
+```
+
+### Accident Data
+
+\#1. Are there some days of the week where more accidents happen than on others? Use `table`.
+
+```{r}
+table(accident$DAY_WEEK)
+```
+
+According to the [FARS Analytical User's Manual](https://crashstats.nhtsa.dot.gov/Api/Public/ViewPublication/812602),`DAY_WEEK` of 1 goes with Sunday, 2 goes with Monday, all the way to Saturday.
+
+This shows Saturday with more traffic accidents than any other day. The entire weekend has more accidents than the week days, this makes sense as there are probably more drivers during the weekend.
+
+\#2. What time of the day do accidents happen?
+
+```{r}
+table(accident$HOUR)
+```
+
+Accidents appear to happen most from hours 17 through 21, or hours 5pm through 9pm. As most people are heading home from their evening commutes at this time, this could explain the accidents.
+
+7-9am has a much lower number of accidents—which is when most people are headed to their commutes. The accidents at night could be attributed to fatigue or intoxication.
+
+\#3. What is the number of accidents witth at least one drunk driver?
+
+```{r}
+accident %>% 
+  filter(DRUNK_DR >= 1) %>% 
+  summarize(n = n())
+```
+
+By filtering out the accidents with one or more drunk drivers and summarizing the number of entries, we see that there are 8,769 accidents involving at least one drunk driver.
+
+### Connecting data
+
+\#4. In the person table, identify drivers (PER_TYP == 1, see FARS manual) and subset on them.
+
+```{r}
+personType <- person %>% 
+  filter(PER_TYP == 1)
+head(personType)
+```
+
+\#5. Join accident and person table (work out which variable(s) to use)
+
+```{r}
+joinedData <- full_join(accident, person)
+head(joinedData)
+```
+
+\#6. Tally the number of accidents by day of the week (DAY_WEEK), hour of the day (HOUR) and gender (SEX). Visualize the results.
+
+```{r}
+day_week <- table(joinedData$DAY_WEEK)
+ggplot(joinedData, aes(DAY_WEEK))+
+  geom_bar(stat="count", width=0.7, fill="steelblue")+
+  theme_minimal()
+```
+
+From this chart most accidents occur on weekends (Friday, Saturday, and Sunday) which are the days that people are out more and people are out drinking more.
+
+```{r}
+hour <- table(joinedData$HOUR)
+ggplot(joinedData, aes(HOUR))+
+  geom_bar(stat="count", width=0.5, fill="steelblue")+
+  theme_minimal()
+```
+
+It appears that most accidents happen from about 5pm-9pm, which is around dinner time and when people are heading home from work. When it's more towards 9pm, it could likely be alcohol related or even just from exhaustion.
+
+```{r}
+sex <- table(joinedData$SEX)
+ggplot(joinedData, aes(SEX))+
+  geom_bar(stat="count", width=0.7, fill="steelblue")+
+  theme_minimal()
+```
+
+Men are in approximately double the accidents that women are in. Upon doing some research I found that men tend to engage in riskier behavior while driving and men drive more than women.
+
+\#7 & 8. Plot a choropleth map of accidents on a county level.
+
+First, let's load in the Geographic Locator Codes so we can join the map data later.
+
+```{r}
+glc <- readxl::read_xlsx('FRPP GLC - United StatesFeb132020.xlsx')
+glc <- glc %>% 
+   select('State Name', STATE = 'State Code', COUNTY = 'County Code', 'County Name') %>% 
+   unique()
+```
+```{r}
+glc$STATE <- as.integer(glc$STATE)
+glc$COUNTY <- as.integer(glc$COUNTY)
+glc$`State Name` <- tolower(glc$`State Name`)
+glc$`County Name` <- tolower(glc$`County Name`)
+```
+
+First join the accident data `accident` with `glc`. 
+
+```{r}
+choro <- accident %>% 
+   select(STATE, ST_CASE, COUNTY) %>% 
+   group_by(STATE, COUNTY) %>% 
+   summarize(accidents = n()) %>% 
+   left_join(glc, by = c('STATE', 'COUNTY'))
+```
+
+Load the map data.
+
+```{r}
+counties <- map_data('county')
+counties <- counties %>% 
+   mutate(`State Name` = region, `County Name` = subregion) %>% 
+   select(`State Name`, `County Name`, long, lat, group, order)
+```
+
+Next join all three together.
+
+```{r}
+choro <- choro %>%
+   full_join(counties, by = c('State Name', 'County Name'))
+choro <- choro[order(choro$order), ]
+```
+
+Finally plot the graph.
+
+```{r}
+ggplot(choro, aes(long, lat)) + 
+   geom_polygon(aes(group = group, fill = accidents)) +
+   xlab('Longitude') +
+   ylab('Latitude') +
+   ggtitle('Number of Accidents by County')
+```
+
+Most counties have less than 200 accidents. Some of the larger metropolitan areas, such as parts of Texas, Southern California, and Florida, the amount of accidents is higher, this is expected with a larger number of people.
+
+\#9. Can you find seasonal trends in accident occurrences in different states? Is summer or winter more dangerous? Why?
+
+```{r}
+ggplot(data = choro, aes(x=long, y=lat)) +
+  geom_polygon(aes(group=group)) +
+  geom_point(data = joinedData %>% filter(MONTH %in% c(1,2,12)), aes(x=LONGITUD, y=LATITUDE), color = 'steelblue', alpha = .2, size = .02) +
+  xlim(c(-130, -60)) + ylim(c(20, 50))
+ggplot(data = choro, aes(x=long, y=lat)) +
+  geom_polygon(aes(group=group)) +
+  geom_point(data = joinedData %>% filter(MONTH %in% c(6,7,8)), aes(x=LONGITUD, y=LATITUDE), color = 'steelblue', alpha = .2, size = .02) +
+  xlim(c(-130, -60)) + ylim(c(20, 50))
+```
+
+It looks like there are overall more accidents in summer months that in winter months although they are definitely more scattered during the summer. In winter they are grouped together more, especially in northern parts of the country which could be weather related. It also appears that aside from California, the eastern portion of the United States has many more accidents than the western part, in both winter and summer combined.
